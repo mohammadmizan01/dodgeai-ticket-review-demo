@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TraceGate · Fix Review Console — demo</title>
+<style>
+  :root{
+    --bg:#14161b; --panel:#1d2129; --panel2:#232834; --line:#2f3542;
+    --text:#e8eaf0; --muted:#9aa3b2; --faint:#6b7280;
+    --amber:#f59e0b; --amber-soft:rgba(245,158,11,.12); --amber-line:rgba(245,158,11,.35);
+    --red:#f87171; --green:#4ade80; --radius:10px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+    font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    font-size:14px;line-height:1.5}
+  .wrap{max-width:1240px;margin:0 auto;padding:0 20px 40px}
+  /* ---------- top bar ---------- */
+  .topbar{position:sticky;top:0;z-index:20;background:rgba(20,22,27,.96);
+    border-bottom:1px solid var(--line);backdrop-filter:blur(6px)}
+  .topbar-in{max-width:1240px;margin:0 auto;padding:12px 20px;display:flex;
+    align-items:center;gap:16px;flex-wrap:wrap}
+  .brand{display:flex;align-items:center;gap:10px;margin-right:auto}
+  .brand .mark{width:30px;height:30px;border-radius:8px;background:linear-gradient(135deg,#f59e0b,#b45309);
+    display:flex;align-items:center;justify-content:center;font-weight:800;color:#14161b}
+  .brand b{font-size:16px;letter-spacing:.2px}
+  .brand small{display:block;color:var(--muted);font-size:11px;font-weight:400}
+  .seg{display:flex;background:var(--panel);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .seg button{border:0;background:transparent;color:var(--muted);padding:8px 14px;
+    cursor:pointer;font-size:13px}
+  .seg button.on{background:var(--amber);color:#14161b;font-weight:700}
+  .btn{border:1px solid var(--line);background:var(--panel2);color:var(--text);
+    padding:8px 14px;border-radius:8px;cursor:pointer;font-size:13px}
+  .btn:hover{border-color:var(--amber-line)}
+  .btn.primary{background:var(--amber);border-color:var(--amber);color:#14161b;font-weight:700}
+  .btn.primary:hover{background:#fbbf24}
+  .btn.danger{border-color:rgba(248,113,113,.4);color:var(--red)}
+  .btn:disabled{opacity:.45;cursor:not-allowed}
+  .btn.fail-on{background:rgba(248,113,113,.12);border-color:var(--red);color:var(--red)}
+  /* ---------- stats strip ---------- */
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:20px 0}
+  .stat{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:14px 16px}
+  .stat .k{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.8px}
+  .stat .v{font-size:26px;font-weight:800;margin-top:4px}
+  .stat .v.amber{color:var(--amber)}
+  .stat .s{color:var(--faint);font-size:12px;margin-top:2px}
+  /* ---------- main layout: timeline FIRST, queue SECOND ---------- */
+  .layout{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:16px;align-items:start}
+  @media(max-width:980px){.layout{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius)}
+  .card-h{padding:14px 18px;border-bottom:1px solid var(--line);display:flex;
+    align-items:center;gap:10px;flex-wrap:wrap}
+  .card-h h2{margin:0;font-size:15px}
+  .card-h .spacer{flex:1}
+  /* ---------- timeline ---------- */
+  .tl{position:relative;padding:22px 22px 22px 54px}
+  .tl::before{content:"";position:absolute;left:29px;top:26px;bottom:26px;width:2px;background:var(--line)}
+  .node{position:relative;margin-bottom:12px}
+  .dot{position:absolute;left:-33px;top:15px;width:16px;height:16px;border-radius:50%;
+    background:var(--panel);border:2px solid #4b5563;z-index:1}
+  .node.open .dot{border-color:var(--amber);background:var(--amber-soft)}
+  .node.gate .dot{border-color:var(--amber);background:transparent;box-shadow:0 0 0 5px var(--amber-soft)}
+  .hop{width:100%;text-align:left;background:var(--panel2);border:1px solid var(--line);
+    border-radius:var(--radius);color:var(--text);padding:12px 14px;cursor:pointer;
+    display:flex;align-items:center;gap:12px}
+  .hop:hover{border-color:var(--amber-line)}
+  .step{flex:0 0 26px;height:26px;border-radius:50%;background:#14161b;border:1px solid var(--line);
+    color:var(--muted);font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center}
+  .node.open .step{background:var(--amber);border-color:var(--amber);color:#14161b}
+  .hop .t{font-weight:700}
+  .hop .chev{margin-left:auto;color:var(--faint);transition:transform .15s}
+  .node.open .chev{transform:rotate(90deg)}
+  .chip{font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px;white-space:nowrap}
+  .chip.hi{background:var(--amber-soft);color:var(--amber);border:1px solid var(--amber-line)}
+  .chip.md{background:#2a3140;color:#c3cad6;border:1px solid var(--line)}
+  .chip.sev-critical{background:rgba(248,113,113,.12);color:var(--red);border:1px solid rgba(248,113,113,.35)}
+  .chip.sev-high{background:var(--amber-soft);color:var(--amber);border:1px solid var(--amber-line)}
+  .chip.sev-medium{background:#2a3140;color:#c3cad6;border:1px solid var(--line)}
+  .chip.st-pending{background:rgba(245,158,11,.12);color:var(--amber);border:1px solid var(--amber-line)}
+  .chip.st-approved{background:rgba(74,222,128,.1);color:var(--green);border:1px solid rgba(74,222,128,.3)}
+  .chip.st-rejected{background:rgba(248,113,113,.1);color:var(--red);border:1px solid rgba(248,113,113,.3)}
+  .chip.flag{background:rgba(248,113,113,.1);color:var(--red);border:1px dashed rgba(248,113,113,.5)}
+  .hop-body{display:none;padding:14px 16px 16px;background:#191d24;border:1px solid var(--line);
+    border-top:0;border-radius:0 0 var(--radius) var(--radius);margin:-6px 0 0}
+  .node.open .hop-body{display:block}
+  .hop-body p{margin:0 0 10px;color:#cfd5df}
+  .ev{margin:0 0 12px;padding:0;list-style:none;display:flex;flex-wrap:wrap;gap:6px}
+  .ev li{font-size:12px;background:#14161b;border:1px solid var(--line);border-radius:6px;
+    padding:4px 9px;color:var(--muted)}
+  .conf{background:var(--amber-soft);border:1px solid var(--amber-line);border-radius:8px;
+    padding:10px 12px;font-size:13px;margin-bottom:4px}
+  .conf b{color:var(--amber)}
+  /* ---------- fix preview ---------- */
+  .preview{margin-top:12px;border:1px solid var(--amber-line);border-radius:8px;overflow:hidden}
+  .preview .pv-h{background:rgba(245,158,11,.08);padding:10px 14px;font-weight:700;color:var(--amber);
+    border-bottom:1px solid var(--amber-line);font-size:13px}
+  .diff{display:grid;grid-template-columns:1fr 1fr}
+  @media(max-width:640px){.diff{grid-template-columns:1fr}}
+  .diff>div{padding:12px 14px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;
+    white-space:pre-wrap}
+  .diff .before{background:rgba(248,113,113,.06);border-right:1px solid var(--line);color:#fca5a5}
+  .diff .after{background:rgba(74,222,128,.06);color:#86efac}
+  .diff .lbl{font-family:inherit;font-size:11px;text-transform:uppercase;letter-spacing:.8px;
+    display:block;margin-bottom:8px;color:var(--muted)}
+  .decide{margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  .locknote{font-size:12px;color:var(--faint)}
+  .banner{border-radius:8px;padding:10px 14px;margin-top:14px;font-size:13px}
+  .banner.ok{background:rgba(74,222,128,.08);border:1px solid rgba(74,222,128,.3)}
+  .banner.no{background:rgba(248,113,113,.08);border:1px solid rgba(248,113,113,.3)}
+  /* ---------- checklist ---------- */
+  .check{padding:14px 18px;border-bottom:1px solid var(--line);background:#191d24}
+  .check h3{margin:0 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted)}
+  .pbar{height:8px;background:#14161b;border:1px solid var(--line);border-radius:999px;overflow:hidden;margin-bottom:10px}
+  .pbar i{display:block;height:100%;background:linear-gradient(90deg,#b45309,var(--amber));width:0;transition:width .25s}
+  .checklist{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:1fr 1fr;gap:6px}
+  @media(max-width:640px){.checklist{grid-template-columns:1fr}}
+  .checklist li{font-size:13px;color:var(--muted);display:flex;gap:8px;align-items:center}
+  .checklist li.done{color:var(--text)}
+  .box{width:16px;height:16px;border-radius:4px;border:1px solid var(--faint);flex:0 0 16px;
+    display:flex;align-items:center;justify-content:center;font-size:11px;color:#14161b}
+  .checklist li.done .box{background:var(--amber);border-color:var(--amber);font-weight:800}
+  .note-row{margin-top:10px;display:flex;gap:8px}
+  .note-row input{flex:1;background:#14161b;border:1px solid var(--line);border-radius:8px;
+    color:var(--text);padding:8px 12px;font-size:13px}
+  /* ---------- queue (secondary) ---------- */
+  .q-tools{padding:14px;border-bottom:1px solid var(--line);display:grid;gap:8px}
+  .q-tools input[type=text],.q-tools select{background:#14161b;border:1px solid var(--line);
+    border-radius:8px;color:var(--text);padding:8px 10px;font-size:13px;width:100%}
+  .q-tools .row2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .flagrow{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)}
+  .qitem{width:100%;text-align:left;background:transparent;border:0;border-bottom:1px solid var(--line);
+    color:var(--text);padding:12px 16px;cursor:pointer;display:block}
+  .qitem:hover{background:#222836}
+  .qitem.sel{background:rgba(245,158,11,.07);box-shadow:inset 3px 0 0 var(--amber)}
+  .qitem .id{font-family:ui-monospace,Menlo,monospace;font-size:12px;color:var(--amber)}
+  .qitem .ti{font-weight:600;margin:2px 0 6px}
+  .qitem .meta{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+  .qitem .sys{font-size:11px;color:var(--faint);margin-left:auto}
+  .pager{display:flex;align-items:center;justify-content:space-between;padding:10px 14px}
+  .pager span{font-size:12px;color:var(--muted)}
+  .empty{padding:36px 20px;text-align:center;color:var(--muted)}
+  .empty .big{font-size:30px;margin-bottom:8px}
+  /* ---------- skeleton / error ---------- */
+  .skel{padding:22px}
+  .sk{border-radius:8px;background:linear-gradient(90deg,#222836 25%,#2b3242 50%,#222836 75%);
+    background-size:200% 100%;animation:sh 1.1s infinite;margin-bottom:12px}
+  @keyframes sh{to{background-position:-200% 0}}
+  .err{margin:26px;border:1px solid rgba(248,113,113,.4);background:rgba(248,113,113,.07);
+    border-radius:var(--radius);padding:26px;text-align:center}
+  .err h3{margin:0 0 8px;color:var(--red)}
+  .err p{color:var(--muted);margin:0 0 14px}
+  /* ---------- misc ---------- */
+  .toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:#0f1116;
+    border:1px solid var(--amber-line);color:var(--text);padding:10px 18px;border-radius:999px;
+    font-size:13px;display:none;z-index:50;box-shadow:0 8px 30px rgba(0,0,0,.5)}
+  footer{margin-top:26px;padding:16px 4px;color:var(--faint);font-size:12px;border-top:1px solid var(--line)}
+  footer b{color:var(--muted)}
+  .about{font-size:12px;color:var(--faint);margin:14px 2px 0}
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="topbar-in">
+    <div class="brand">
+      <div class="mark">T</div>
+      <div><b>TraceGate</b><small>Fix review console · approval-gate demo</small></div>
+    </div>
+    <div class="seg" role="group" aria-label="Role switcher">
+      <button id="roleOncall" class="on" onclick="setRole('oncall')">On-call engineer</button>
+      <button id="roleViewer" onclick="setRole('viewer')">Viewer · read-only</button>
+    </div>
+    <button id="failBtn" class="btn" onclick="toggleFail()">Simulate API failure: off</button>
+  </div>
+</div>
+
+<div class="wrap">
+  <p class="about">A fictional review console for the human approval gate: agent-proposed fixes queue up,
+  a reviewer expands the root-cause trace, reads the confidence notes, previews the fix,
+  then approves or rejects. All data below is invented for the demo.</p>
+
+  <!-- stats strip -->
+  <div class="stats">
+    <div class="stat"><div class="k">Pending approval</div><div class="v amber" id="stPending">–</div><div class="s">fixes waiting at the gate</div></div>
+    <div class="stat"><div class="k">Flagged for specialist</div><div class="v" id="stFlagged">–</div><div class="s">needs human deep-dive</div></div>
+    <div class="stat"><div class="k">Avg. fix confidence</div><div class="v amber" id="stConf">–</div><div class="s">pending fixes, agent-reported</div></div>
+    <div class="stat"><div class="k">Median queue time</div><div class="v" id="stQueue">–</div><div class="s">pending fixes waiting</div></div>
+  </div>
+
+  <div class="layout">
+    <!-- MAIN: trace timeline (detail panel) -->
+    <section class="card" aria-label="Root-cause trace timeline">
+      <div class="card-h">
+        <h2 id="tlTitle">Select a ticket</h2>
+        <span id="tlMeta"></span>
+        <div class="spacer"></div>
+        <button class="btn" id="expandAllBtn" onclick="expandAll()">Expand all</button>
+      </div>
+      <div class="check" id="checkWrap" style="display:none">
+        <h3>Review checklist</h3>
+        <div class="pbar"><i id="pbarFill"></i></div>
+        <ul class="checklist">
+          <li id="ckTrace"><span class="box"></span>All trace hops expanded</li>
+          <li id="ckPreview"><span class="box"></span>Fix preview opened</li>
+          <li id="ckNote"><span class="box"></span>Reviewer note saved</li>
+          <li id="ckDecision"><span class="box"></span>Decision recorded</li>
+        </ul>
+        <div class="note-row">
+          <input id="noteInput" type="text" placeholder="Add a reviewer note (e.g. verified against change calendar)…">
+          <button class="btn" onclick="saveNote()">Save note</button>
+        </div>
+      </div>
+      <div id="tlBody"></div>
+    </section>
+
+    <!-- SECONDARY: ticket queue -->
+    <aside class="card" aria-label="Ticket queue">
+      <div class="card-h"><h2>Ticket queue</h2><div class="spacer"></div><span id="qCount" style="font-size:12px;color:var(--muted)"></span></div>
+      <div class="q-tools">
+        <input id="q" type="text" placeholder="Search id, title, symptom…" autocomplete="off">
+        <div class="row2">
+          <select id="fStatus">
+            <option value="all">All statuses</option>
+            <option value="pending" selected>Pending</option>
+            <option value="approved">Approved</option>
+            <option value="rejected">Rejected</option>
+          </select>
+          <select id="fSev">
+            <option value="all">All severities</option>
+            <option value="critical">Critical</option>
+            <option value="high">High</option>
+            <option value="medium">Medium</option>
+          </select>
+        </div>
+        <label class="flagrow"><input type="checkbox" id="fFlag"> Flagged-only</label>
+      </div>
+      <div id="qList"></div>
+      <div class="pager">
+        <button class="btn" id="pgPrev" onclick="page(-1)">‹ Prev</button>
+        <span id="pgInfo"></span>
+        <button class="btn" id="pgNext" onclick="page(1)">Next ›</button>
+      </div>
+    </aside>
+  </div>
+
+  <footer>
+    <b>Demo data only — illustrative tickets and traces, no real clients, systems or data; no integration with Dodge AI.</b>
+  </footer>
+</div>
+
+<div class="toast" id="toast"></div>
+<script>
+/* All ticket data below is fictional and invented for this demo. */
+const TICKETS = [
+{ id:"ERP-2417", title:"Purchase-order approvals stall after release-strategy change", system:"ERP", severity:"high", status:"pending", flagged:false, queueMins:184, note:"", decision:null,
+  hops:[
+   {t:"Symptom captured", d:"214 purchase orders stuck in 'awaiting release' for over 48 hours; approval dashboard shows a growing stalled queue.", ev:["ITSM ticket volume +38% week-over-week","Approval dashboard queue depth","12 user reports from plant 12"], conf:"High", pct:92, note:"Matched 61 similar stall patterns in operating memory."},
+   {t:"Signal correlated", d:"A release-strategy configuration change was imported 6 days ago; approval routing now skips level-2 for cost center 4100.", ev:["Config change log · 6 days ago","Routing rule diff (before/after)","Affected cost centers list"], conf:"High", pct:89, note:"Change timestamp lines up with the first stalled PO to the hour."},
+   {t:"Custom rule identified", d:"Cost center 4100 uses site-specific release codes R41/R42 that are not part of the new strategy matrix — an undocumented plant-level exception.", ev:["Plant 12 exception register","9 prior stall cases, same signature"], conf:"Medium", pct:74, note:"Exception is not in standard configuration docs; inferred from 9 prior cases with the same signature."},
+   {t:"Root cause isolated", d:"Strategy ZP2 has no entries for release codes R41/R42, so the workflow exits silently instead of routing — POs wait forever.", ev:["Workflow exit trace","Strategy matrix lookup miss"], conf:"High", pct:90, note:"Reproduced the miss against a copy of the strategy matrix: no fallback path exists."},
+   {t:"Fix composed", d:"Backfill the strategy matrix with the missing release codes and add a routing fallback that flags unmapped codes instead of stalling.", ev:["3 matrix rows to add","Fallback rule draft","Blast radius: release strategy config only"], conf:"High", pct:88, note:"Fix touches configuration only — no code change — and is reversible by re-import."},
+   {t:"Fix proposed — awaiting approval", gate:true, d:"The agent has prepared the configuration change. Nothing is applied until a person approves it at this gate.", ev:["Dry-run passed on config copy","Rollback plan attached"], conf:"High", pct:88, note:"Human approval required: this writes to production approval routing.",
+    fix:{before:"STRATEGY ZP2\n  R10 -> L1, L2\n  R20 -> L1, L2\n  (no entry for R41/R42)\nROUTING: unmapped code -> EXIT (silent)", after:"STRATEGY ZP2\n  R10 -> L1, L2\n  R20 -> L1, L2\n  R41 -> L1, L2   # plant 12 exception\n  R42 -> L1, L2   # plant 12 exception\nROUTING: unmapped code -> FLAG for review"}} ]},
+{ id:"CRM-3092", title:"Contact sync retries spike between CRM and integration bus", system:"Integration Bus", severity:"medium", status:"pending", flagged:false, queueMins:96, note:"", decision:null,
+  hops:[
+   {t:"Symptom captured", d:"Retry queue on the CRM sync channel exceeds 5,000 messages; contact updates arrive hours late in downstream systems.", ev:["Retry queue depth chart","Sync lag SLA breach x3"], conf:"High", pct:91, note:"Steady climb over 3 days — not a one-off spike."},
+   {t:"Signal correlated", d:"Payload validation rejects records where the industry code is null; partner feed started sending nulls after their own schema update.", ev:["Validator error log sample","Partner schema changelog"], conf:"High", pct:87, note:"Every rejected record shares the null industry code."},
+   {t:"Custom rule identified", d:"The field-mapping table assumes industry code is always present — a partner-specific exception was never encoded.", ev:["Mapping table v14","Partner onboarding notes"], conf:"Medium", pct:71, note:"Assumption was documented nowhere; inferred from mapping table defaults."},
+   {t:"Root cause isolated", d:"The mapper throws on null industry code, the message goes back to the queue, and the cycle repeats — a retry loop with no dead-letter path.", ev:["Stack trace excerpt","Retry policy: infinite"], conf:"High", pct:93, note:"Root cause confirmed by replaying one failed message in the sandbox."},
+   {t:"Fix composed", d:"Add a default industry-code mapping for nulls and route unparseable records to a dead-letter queue for weekly review.", ev:["Default mapping draft","Dead-letter queue config"], conf:"High", pct:86, note:"Fix is additive: existing valid mappings are untouched."},
+   {t:"Fix proposed — awaiting approval", gate:true, d:"Prepared mapping update plus dead-letter routing. Applies on approval; queue drains automatically after.", ev:["Sandbox replay: 0 retries","Backfill plan for 5,000 queued msgs"], conf:"High", pct:86, note:"Human approval required: changes how partner data is interpreted.",
+    fix:{before:"MAP industry_code:\n  null -> THROW ValidationError\n  (no dead-letter; retry forever)", after:"MAP industry_code:\n  null -> 'UNSPECIFIED' (default)\n  unparseable -> DEAD_LETTER queue\nRETRY: max 5, then dead-letter"}} ]},
+{ id:"WMS-1185", title:"Picking wave release intermittently fails at shift change", system:"WMS", severity:"critical", status:"pending", flagged:true, queueMins:42, note:"", decision:null,
+  hops:[
+   {t:"Symptom captured", d:"Wave release aborts 2–4 times per day; warehouse supervisors restart it manually, delaying outbound shipments.", ev:["Wave release job log","Supervisor incident notes x6"], conf:"High", pct:90, note:"Failures cluster tightly around 05:55–06:10 — shift change window."},
+   {t:"Signal correlated", d:"The job reads the active shift roster at start; during roster rollover the roster is briefly empty, so the job aborts with no crew assigned.", ev:["Roster rollover timestamps","Job start timestamps"], conf:"High", pct:88, note:"Every abort falls inside the 15-minute rollover window."},
+   {t:"Custom rule identified", d:"This site runs an overlapping night-shift exception: two rosters are valid for 15 minutes, but the job only accepts one.", ev:["Site shift-calendar exception","Roster schema v3"], conf:"Medium", pct:76, note:"Overlap exception is site-specific and was never encoded in the job logic."},
+   {t:"Root cause isolated", d:"Race condition: roster snapshot happens after crew validation. During rollover the snapshot is empty and validation fails.", ev:["Job source excerpt","Timing diagram"], conf:"High", pct:91, note:"Race reproduced in staging by simulating the rollover."},
+   {t:"Fix composed", d:"Snapshot the roster at job start before validation, and retry once after 5 minutes if the roster is empty instead of aborting.", ev:["Patch diff (12 lines)","Staging test: 50/50 rollovers clean"], conf:"High", pct:89, note:"Minimal change: snapshot ordering only, no new dependencies."},
+   {t:"Fix proposed — awaiting approval", gate:true, d:"Job patch prepared. Flagged for specialist attention because it touches outbound fulfillment during peak season.", ev:["Staging pass rate 100%","Rollback: previous job version kept"], conf:"High", pct:89, note:"Human approval required: flagged — fulfillment impact during peak season.",
+    fix:{before:"wave_release():\n  validate_crew(roster.now())\n  snapshot = roster.now()\n  if empty(crew): ABORT", after:"wave_release():\n  snapshot = roster.snapshot()\n  if empty(snapshot): sleep(5m); snapshot = roster.snapshot()\n  validate_crew(snapshot)\n  if empty(crew): ABORT with alert"}} ]},
+{ id:"ERP-2458", title:"Intercompany billing posts with wrong tax code", system:"ERP", severity:"high", status:"pending", flagged:false, queueMins:231, note:"", decision:null,
+  hops:[
+   {t:"Symptom captured", d:"47 intercompany invoices posted this month with tax code T1 instead of T9; finance must reverse and repost each one.", ev:["Invoice exception report","Reversal workload: 6 hrs/week"], conf:"High", pct:90, note:"Pattern is consistent: same company pair, same document type."},
+   {t:"Signal correlated", d:"A tax-determination rule change last quarter introduced a default that fires before the intercompany-specific rule.", ev:["Rule change log","Rule evaluation order"], conf:"High", pct:87, note:"Evaluation order changed; the intercompany rule now never fires."},
+   {t:"Custom rule identified", d:"This company pair uses a bilateral tax exception agreed in 2021 — it lives in a spreadsheet, not in the rule engine.", ev:["2021 bilateral agreement (spreadsheet)","Rule engine: no record"], conf:"Medium", pct:73, note:"The exception was never migrated into the system when the rule engine was adopted."},
+   {t:"Root cause isolated", d:"Default tax rule shadows the intercompany rule for document type IV; the exception has no digital representation to win the match.", ev:["Rule trace for invoice #INV-8841","Shadow analysis"], conf:"High", pct:92, note:"Encoding the exception digitally removes the shadow."},
+   {t:"Fix composed", d:"Encode the bilateral exception as a priority rule for the company pair and demote the default so it only fires as a last resort.", ev:["New rule draft","Regression: 200 test invoices"], conf:"High", pct:85, note:"Regression set passes; no other company pairs affected."},
+   {t:"Fix proposed — awaiting approval", gate:true, d:"Tax-rule change prepared. Finance sign-off recommended since it alters posting behavior.", ev:["Test postings: 200/200 correct","Effective-dating plan"], conf:"High", pct:85, note:"Human approval required: alters financial postings.",
+    fix:{before:"RULE ORDER:\n  1. DEFAULT tax rule (T1)\n  2. intercompany rule (never reached for type IV)", after:"RULE ORDER:\n  1. BILATERAL exception: pair A/B + type IV -> T9\n  2. intercompany rule\n  3. DEFAULT tax rule (T1, last resort)"}} ]},
+{ id:"ERP-2477", title:"Vendor master changes trigger duplicate payment holds", system:"ERP", severity:"high", status:"pending", flagged:false, queueMins:158, note:"", decision:null,
+  hops:[
+   {t:"Symptom captured", d:"Vendors report duplicate payment holds after master-data updates; AP team clears them manually, ~40 per week.", ev:["Hold register","Vendor complaints x9"], conf:"High", pct:88, note:"Holds always come in pairs within seconds of each other."},
+   {t:"Signal correlated", d:"Each master-data change emits two events — one from the request, one from the approval — and both trigger the hold check.", ev:["Event bus log","Hold trigger timestamps"], conf:"High", pct:91, note:"Paired events are 2–4 seconds apart, matching request→approval flow."},
+   {t:"Custom rule identified", d:"A legacy duplicate-check was disabled during last year's upgrade; the new flow was assumed to dedupe but does not.", ev:["Upgrade runbook","Dedupe logic: absent"], conf:"Medium", pct:75, note:"Assumption was never verified after the upgrade."},
+   {t:"Root cause isolated", d:"No idempotency key on the hold-check trigger, so the approval event creates a second hold for the same vendor change.", ev:["Trigger definition","Missing idempotency key"], conf:"High", pct:90, note:"Idempotency key on (vendor, change-id) eliminates the duplicate."},
+   {t:"Fix composed", d:"Add an idempotency key to the hold trigger and add a cleanup job that merges existing duplicate holds.", ev:["Trigger patch","Cleanup job spec"], conf:"High", pct:87, note:"Cleanup is read-then-merge; no payments are released by it."},
+   {t:"Fix proposed — awaiting approval", gate:true, d:"Trigger patch plus one-time cleanup prepared. AP lead review suggested before the cleanup runs.", ev:["Staging: duplicates eliminated","Cleanup dry-run: 212 pairs found"], conf:"High", pct:87, note:"Human approval required: cleanup touches payment holds.",
+    fix:{before:"on vendor_change:\n  create_hold(vendor)   # no dedupe\n  # approval event fires again -> second hold", after:"on vendor_change:\n  key = (vendor, change_id)\n  if not hold_exists(key): create_hold(vendor, key)\ncleanup: merge_holds(group by key)"}} ]},
+{ id:"HRM-0721", title:"Time-sheet approval notifications not delivered", system:"HRM", severity:"medium", status:"pending", flagged:false, queueMins:305, note:"", decision:null,
+  hops:[
+   {t:"Symptom captured", d:"Managers report missing time-sheet approval emails; 18% of time sheets miss the weekly cutoff.", ev:["Notification delivery log","Missed cutoff rate"], conf:"High", pct:89, note:"Drop is specific to the approval notification template."},
+   {t:"Signal correlated", d:"The mail template references a manager attribute renamed in the directory sync; rendering fails silently.", ev:["Template error log","Directory schema diff"], conf:"High", pct:90, note:"Every failure logs the same missing attribute."},
+   {t:"Custom rule identified", d:"This business unit overrides the standard template with extra fields — the override was not updated after the rename.", ev:["Template override registry","Unit-specific fields"], conf:"Medium", pct:72, note:"Override is unit-specific; the standard template works fine."},
+   {t:"Root cause isolated", d:"Silent render failure: the mailer catches the exception and drops the message instead of queuing a fallback.", ev:["Mailer exception handler","Dropped message count"], conf:"High", pct:93, note:"Fix has two parts: correct the field, and stop dropping on error."},
+   {t:"Fix composed", d:"Update the override template to the renamed attribute and change the mailer to queue a plain-text fallback instead of dropping.", ev:["Template patch","Mailer fallback change"], conf:"High", pct:86, note:"Fallback guarantees a notification even if a template breaks again."},
+   {t:"Fix proposed — awaiting approval", gate:true, d:"Template plus mailer change prepared. Low risk: notifications only.", ev:["Render test: 40/40 pass","Fallback verified"], conf:"High", pct:86, note:"Human approval required: standard gate, low blast radius.",
+    fix:{before:"template: manager.{{old_attr}}\nmailer: on render error -> DROP silently", after:"template: manager.{{new_attr}}\nmailer: on render error -> queue plain-text fallback"}} ]},
+{ id:"ITSM-0512", title:"Recurring P2 incidents auto-escalate without notes", system:"ITSM", severity:"medium", status:"pending", flagged:false, queueMins:77, note:"", decision:null,
+  hops:[
+   {t:"Symptom captured", d:"P2 incidents escalate to P1 automatically with no context, paging duty managers overnight for issues the day team already triaged.", ev:["Escalation log","Overnight pages x14"], conf:"High", pct:87, note:"Escalations carry empty work notes."},
+   {t:"Signal correlated", d:"The auto-escalation rule fires on age alone; it does not check whether triage notes exist or the incident is already owned.", ev:["Escalation rule definition","Note-presence check: none"], conf:"High", pct:89, note:"Rule predates the triage workflow by two years."},
+   {t:"Custom rule identified", d:"The night-shift team added an informal 'do not escalate if owned' practice that was never encoded in the rule.", ev:["Shift handover notes","Rule engine: no such condition"], conf:"Medium", pct:70, note:"Practice exists in handover docs only."},
+   {t:"Root cause isolated", d:"Escalation condition ignores ownership and note state, so owned, triaged incidents escalate exactly like unowned ones.", ev:["Rule trace sample","Owned-vs-unowned comparison"], conf:"High", pct:91, note:"Adding two conditions fixes the misfire without touching SLA timers."},
+   {t:"Fix composed", d:"Require 'no owner' or 'no triage note in 30 min' before auto-escalation; keep the age-based SLA timer unchanged.", ev:["Rule patch draft","Simulation: 0 false escalations"], conf:"High", pct:88, note:"SLA timers untouched — only the escalation trigger narrows."},
+   {t:"Fix proposed — awaiting approval", gate:true, d:"Escalation-rule update prepared. Duty-manager review suggested given on-call impact.", ev:["Simulation on 90 days of data","Rollback: one-click rule revert"], conf:"High", pct:88, note:"Human approval required: changes on-call paging behavior.",
+    fix:{before:"ESCALATE P2->P1 when:\n  age > 45min", after:"ESCALATE P2->P1 when:\n  age > 45min AND (owner IS NULL\n    OR no triage note in 30min)"}} ]},
+{ id:"WMS-1201", title:"Cycle-count adjustment reversals stack up unapproved", system:"WMS", severity:"medium", status:"pending", flagged:false, queueMins:412, note:"", decision:null,
+  hops:[
+   {t:"Symptom captured", d:"340 cycle-count reversals await approval; inventory accuracy reports are frozen until the queue clears.", ev:["Reversal queue depth","Frozen accuracy report"], conf:"High", pct:88, note:"Queue grows ~25 per day; approvals happen in weekly batches."},
+   {t:"Signal correlated", d:"Reversals route to a supervisor queue, but the supervisor role was consolidated and the new role lacks the approval permission.", ev:["Role consolidation ticket","Permission matrix diff"], conf:"High", pct:90, note:"Permission gap dates to the reorganization 5 weeks ago."},
+   {t:"Custom rule identified", d:"High-value reversals need dual approval per site policy — the policy is enforced by convention, not by the system.", ev:["Site policy doc","System: single approval only"], conf:"Medium", pct:74, note:"Convention breaks when the single approver is missing."},
+   {t:"Root cause isolated", d:"Approval routing points at a role with no approvers; reversals pile up instead of rerouting.", ev:["Routing rule","Empty approver list"], conf:"High", pct:92, note:"Rerouting plus a permission fix clears the structural block."},
+   {t:"Fix composed", d:"Grant the consolidated role the approval permission, reroute the queue, and encode the dual-approval policy for high-value reversals.", ev:["Role permission patch","Routing update","Dual-approval rule"], conf:"High", pct:85, note:"Dual-approval becomes system-enforced, not conventional."},
+   {t:"Fix proposed — awaiting approval", gate:true, d:"Role, routing, and policy change prepared. Inventory-controller sign-off recommended.", ev:["Dry-run routing: 340 assigned","Policy test: high-value blocked singly"], conf:"High", pct:85, note:"Human approval required: changes inventory approval policy.",
+    fix:{before:"APPROVERS for reversals: role 'WH-SUP' (0 members)\nHigh-value: single approval (by convention)", after:"APPROVERS: role 'WH-LEAD' (6 members)\nHigh-value (>$5k): DUAL approval enforced"}} ]},
+{ id:"ERP-2440", title:"Month-end reconciliation job slows finance close", system:"ERP", severity:"medium", status:"approved", flagged:false, queueMins:0, note:"Verified against close calendar.", decision:{action:"approved", by:"On-call", at:"09:12"},
+  hops:[
+   {t:"Symptom captured", d:"Reconciliation job runs 6+ hours on close week, blocking dependent close tasks.", ev:["Job runtime chart","Close task dependencies"], conf:"High", pct:89, note:"Runtime doubled since the new ledger segment was added."},
+   {t:"Signal correlated", d:"The job scans the full ledger instead of the close-relevant slice after the segment change.", ev:["Query plan","Segment change log"], conf:"High", pct:90, note:"Full scan confirmed in the query plan."},
+   {t:"Root cause isolated", d:"Partition filter was dropped from the query when the segment was added.", ev:["Query diff"], conf:"High", pct:93, note:"One-line filter restores partition pruning."},
+   {t:"Fix composed", d:"Restore the partition filter and add a regression alert if scan size exceeds 2x baseline.", ev:["Query patch","Alert rule"], conf:"High", pct:90, note:"Read-only change to the query; no postings touched."},
+   {t:"Fix proposed — awaiting approval", gate:true, d:"Query patch prepared. Approved earlier today after trace review.", ev:["Staging runtime: 6h -> 41min"], conf:"High", pct:90, note:"Decision already recorded for this ticket.",
+    fix:{before:"SELECT ... FROM ledger  -- full scan\nWHERE period = 'close'", after:"SELECT ... FROM ledger\nWHERE period = 'close'\n  AND segment IN (close_segments)  -- partition prune"}} ]},
+{ id:"CRM-3110", title:"Duplicate leads created on webform resubmission", system:"CRM", severity:"medium", status:"rejected", flagged:false, queueMins:0, note:"Needs marketing sign-off first.", decision:{action:"rejected", by:"On-call", at:"08:47"},
+  hops:[
+   {t:"Symptom captured", d:"Webform resubmissions create duplicate lead records; sales works the same lead twice.", ev:["Duplicate lead report","Sales complaints x5"], conf:"High", pct:86, note:"Duplicates share email + 60-second window."},
+   {t:"Root cause isolated", d:"No dedupe on the form handler; double-clicks and retries each create a record.", ev:["Handler code excerpt"], conf:"High", pct:91, note:"Client-side debounce plus server dedupe proposed."},
+   {t:"Fix composed", d:"Add idempotency token to the form and server-side dedupe on email within 5 minutes.", ev:["Patch draft"], conf:"High", pct:84, note:"Rejected: marketing wants to review dedupe window first."},
+   {t:"Fix proposed — awaiting approval", gate:true, d:"Rejected earlier today — awaiting marketing sign-off on the dedupe window before re-proposal.", ev:["Rejection reason logged"], conf:"High", pct:84, note:"Decision already recorded for this ticket.",
+    fix:{before:"on submit: create_lead(data)  # every click", after:"on submit:\n  token = form.idempotency_token\n  if not lead_exists(token): create_lead(data, token)"}} ]}
+];
+</script>
+<script>
+/* ---------- state ---------- */
+let role = "oncall";            // oncall | viewer
+let failMode = false;           // simulate API failure
+let searchText = "", fStatus = "pending", fSev = "all", fFlag = false;
+let pageIdx = 0; const PAGE_SIZE = 4;
+let selectedId = null;
+let expanded = {};              // ticketId -> Set of hop indexes
+let previewOpen = {};           // ticketId -> bool
+let searchTimer = null;
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+function toast(msg){ const t=$("toast"); t.textContent=msg; t.style.display="block";
+  clearTimeout(t._h); t._h=setTimeout(()=>t.style.display="none",2600); }
+
+/* ---------- stats ---------- */
+function renderStats(){
+  const pend = TICKETS.filter(t=>t.status==="pending");
+  $("stPending").textContent = pend.length;
+  $("stFlagged").textContent = TICKETS.filter(t=>t.flagged).length;
+  $("stConf").textContent = pend.length
+    ? Math.round(pend.reduce((a,t)=>a+lastHop(t).pct,0)/pend.length)+"%" : "–";
+  $("stQueue").textContent = pend.length
+    ? (median(pend.map(t=>t.queueMins))/60).toFixed(1)+"h" : "–";
+}
+function lastHop(t){ return t.hops[t.hops.length-1]; }
+function median(a){ const s=[...a].sort((x,y)=>x-y); const m=Math.floor(s.length/2);
+  return s.length%2 ? s[m] : (s[m-1]+s[m])/2; }
+
+/* ---------- queue ---------- */
+function filtered(){
+  const q = searchText.trim().toLowerCase();
+  return TICKETS.filter(t=>{
+    if(fStatus!=="all" && t.status!==fStatus) return false;
+    if(fSev!=="all" && t.severity!==fSev) return false;
+    if(fFlag && !t.flagged) return false;
+    if(q && !(t.id.toLowerCase().includes(q)||t.title.toLowerCase().includes(q)||
+      t.hops[0].d.toLowerCase().includes(q))) return false;
+    return true;
+  });
+}
+function renderQueue(){
+  const list = filtered();
+  const pages = Math.max(1, Math.ceil(list.length/PAGE_SIZE));
+  pageIdx = Math.min(pageIdx, pages-1);
+  const slice = list.slice(pageIdx*PAGE_SIZE, pageIdx*PAGE_SIZE+PAGE_SIZE);
+  $("qCount").textContent = list.length+" ticket"+(list.length===1?"":"s");
+  if(!slice.length){
+    $("qList").innerHTML = '<div class="empty"><div class="big">∅</div>'+
+      '<div>No tickets match your filters.</div>'+
+      '<div style="margin-top:12px"><button class="btn" onclick="clearFilters()">Clear filters</button></div></div>';
+  } else {
+    $("qList").innerHTML = slice.map(t=>
+      '<button class="qitem'+(t.id===selectedId?" sel":"")+'" onclick="selectTicket(\''+t.id+'\')">'+
+      '<div class="id">'+esc(t.id)+'</div><div class="ti">'+esc(t.title)+'</div>'+
+      '<div class="meta"><span class="chip sev-'+t.severity+'">'+t.severity+'</span>'+
+      '<span class="chip st-'+t.status+'">'+t.status+'</span>'+
+      (t.flagged?'<span class="chip flag">⚑ flagged</span>':"")+
+      '<span class="sys">'+esc(t.system)+'</span></div></button>').join("");
+  }
+  $("pgInfo").textContent = "Page "+(pageIdx+1)+" of "+pages;
+  $("pgPrev").disabled = pageIdx===0; $("pgNext").disabled = pageIdx>=pages-1;
+}
+function clearFilters(){ searchText=""; $("q").value=""; fStatus="all"; $("fStatus").value="all";
+  fSev="all"; $("fSev").value="all"; fFlag=false; $("fFlag").checked=false; pageIdx=0; renderQueue(); }
+function page(d){ pageIdx+=d; renderQueue(); }
+
+/* debounced search */
+$("q").addEventListener("input", e=>{
+  clearTimeout(searchTimer);
+  searchTimer=setTimeout(()=>{ searchText=e.target.value; pageIdx=0; renderQueue(); },300);
+});
+$("fStatus").addEventListener("change", e=>{ fStatus=e.target.value; pageIdx=0; renderQueue(); });
+$("fSev").addEventListener("change", e=>{ fSev=e.target.value; pageIdx=0; renderQueue(); });
+$("fFlag").addEventListener("change", e=>{ fFlag=e.target.checked; pageIdx=0; renderQueue(); });
+
+/* ---------- timeline (main detail panel) ---------- */
+function selectTicket(id){
+  selectedId = id;
+  if(!expanded[id]) expanded[id]=new Set();
+  renderQueue();
+  loadTicket(id);
+}
+function loadTicket(id){
+  $("checkWrap").style.display="none";
+  // loading skeleton
+  $("tlTitle").textContent="Loading…"; $("tlMeta").innerHTML="";
+  let sk='<div class="skel">';
+  for(let i=0;i<5;i++) sk+='<div class="sk" style="height:'+(54+i*8)+'px"></div>';
+  $("tlBody").innerHTML=sk+"</div>";
+  setTimeout(()=>{
+    if(failMode){ renderError(id); return; }
+    renderTimeline(id);
+  }, 700);
+}
+function renderError(id){
+  $("tlTitle").textContent="Could not load ticket";
+  $("tlBody").innerHTML='<div class="err"><h3>⚠ API request failed</h3>'+
+    '<p>Simulated outage: the trace service did not respond. No data was lost.</p>'+
+    '<button class="btn primary" onclick="retryLoad()">Retry</button> '+
+    '<span style="font-size:12px;color:var(--faint)">or turn off “Simulate API failure” above</span></div>';
+}
+function retryLoad(){ if(selectedId) loadTicket(selectedId); }
+function toggleFail(){
+  failMode=!failMode;
+  const b=$("failBtn");
+  b.textContent="Simulate API failure: "+(failMode?"on":"off");
+  b.className="btn"+(failMode?" fail-on":"");
+  toast(failMode?"Failure simulation ON — next load will fail":"Failure simulation off");
+}
+function getT(id){ return TICKETS.find(t=>t.id===id); }
+
+function renderTimeline(id){
+  const t=getT(id); if(!t) return;
+  $("checkWrap").style.display="block";
+  $("tlTitle").textContent=t.id+" — "+t.title;
+  $("tlMeta").innerHTML='<span class="chip sev-'+t.severity+'">'+t.severity+'</span> '+
+    '<span class="chip st-'+t.status+'">'+t.status+'</span> '+
+    (t.flagged?'<span class="chip flag">⚑ flagged</span> ':"")+
+    '<span style="font-size:12px;color:var(--faint)">'+esc(t.system)+
+    (t.status==="pending"?" · in queue "+fmtQ(t.queueMins):"")+'</span>';
+  const ex=expanded[id];
+  $("tlBody").innerHTML='<div class="tl">'+t.hops.map((h,i)=>{
+    const open=ex.has(i), gate=!!h.gate;
+    return '<div class="node'+(open?" open":"")+(gate?" gate":"")+'"><span class="dot"></span>'+
+    '<button class="hop" onclick="toggleHop('+i+')" aria-expanded="'+open+'">'+
+      '<span class="step">'+(i+1)+'</span><span class="t">'+esc(h.t)+'</span>'+
+      '<span class="chip '+(h.conf==="High"?"hi":"md")+'">'+h.conf+' · '+h.pct+'%</span>'+
+      '<span class="chev">›</span></button>'+
+    '<div class="hop-body"><p>'+esc(h.d)+'</p>'+
+      '<ul class="ev">'+h.ev.map(e=>'<li>'+esc(e)+'</li>').join("")+'</ul>'+
+      '<div class="conf"><b>Confidence note — '+h.conf+' ('+h.pct+'%)</b><br>'+esc(h.note)+'</div>'+
+      (gate?gateBlock(t,h):"")+
+    '</div></div>';
+  }).join("")+'</div>';
+  updateChecklist();
+}
+function gateBlock(t,h){
+  if(!previewOpen[t.id]){
+    return '<div style="margin-top:12px"><button class="btn primary" onclick="openPreview(event)">Preview fix before deciding</button> '+
+      '<span class="locknote">Approval requires previewing the proposed change.</span></div>';
+  }
+  let html='<div class="preview"><div class="pv-h">Fix preview — proposed change (not applied)</div>'+
+    '<div class="diff"><div class="before"><span class="lbl">− Before</span>'+esc(h.fix.before)+
+    '</div><div class="after"><span class="lbl">+ After</span>'+esc(h.fix.after)+'</div></div></div>';
+  if(t.decision){
+    const ok=t.decision.action==="approved";
+    html+='<div class="banner '+(ok?"ok":"no")+'"><b>'+(ok?"✓ Approved":"✕ Rejected")+
+      '</b> by '+esc(t.decision.by)+' · '+esc(t.decision.at)+
+      (t.note?' — “'+esc(t.note)+'”':"")+'</div>';
+  } else if(role==="viewer"){
+    html+='<div class="decide"><button class="btn primary" disabled>Approve fix</button>'+
+      '<button class="btn danger" disabled>Reject</button>'+
+      '<button class="btn" disabled>⚑ Flag for specialist</button>'+
+      '<span class="locknote">🔒 Read-only: the Viewer role cannot approve, reject or flag.</span></div>';
+  } else {
+    html+='<div class="decide"><button class="btn primary" onclick="decide(\'approved\')">Approve fix</button>'+
+      '<button class="btn danger" onclick="decide(\'rejected\')">Reject</button>'+
+      '<button class="btn" onclick="flagTicket()">⚑ Flag for specialist</button></div>';
+  }
+  return html;
+}
+function toggleHop(i){
+  const ex=expanded[selectedId];
+  ex.has(i)?ex.delete(i):ex.add(i);
+  renderTimeline(selectedId);
+}
+function expandAll(){
+  if(!selectedId) return;
+  const t=getT(selectedId);
+  expanded[selectedId]=new Set(t.hops.map((_,i)=>i));
+  renderTimeline(selectedId);
+}
+function openPreview(e){
+  if(e) e.stopPropagation();
+  previewOpen[selectedId]=true;
+  renderTimeline(selectedId); updateChecklist();
+  toast("Fix preview opened — review before deciding");
+}
+function decide(action){
+  const t=getT(selectedId);
+  const now=new Date(); const at=String(now.getHours()).padStart(2,"0")+":"+String(now.getMinutes()).padStart(2,"0");
+  t.decision={action, by:"On-call", at}; t.status=action;
+  renderTimeline(selectedId); renderQueue(); renderStats(); updateChecklist();
+  toast(action==="approved"?"✓ Fix approved — decision logged":"✕ Fix rejected — decision logged");
+}
+function flagTicket(){
+  const t=getT(selectedId); t.flagged=!t.flagged;
+  renderTimeline(selectedId); renderQueue(); renderStats();
+  toast(t.flagged?"⚑ Flagged for specialist":"⚑ Flag removed");
+}
+function saveNote(){
+  const v=$("noteInput").value.trim();
+  if(!v){ toast("Write a note first"); return; }
+  getT(selectedId).note=v; $("noteInput").value="";
+  updateChecklist(); renderTimeline(selectedId);
+  toast("Reviewer note saved");
+}
+function fmtQ(m){ return m>=60 ? (m/60).toFixed(1)+"h" : m+"m"; }
+
+/* ---------- role switcher ---------- */
+function setRole(r){
+  role=r;
+  $("roleOncall").className=r==="oncall"?"on":"";
+  $("roleViewer").className=r==="viewer"?"on":"";
+  $("noteInput").disabled=(r==="viewer");
+  document.querySelector('#checkWrap .btn[onclick="saveNote()"]').disabled=(r==="viewer");
+  if(selectedId) renderTimeline(selectedId);
+  toast(r==="viewer"?"Viewer role: read-only — actions are blocked":"On-call role: you can approve, reject and flag");
+}
+
+/* ---------- checklist + progress ---------- */
+function updateChecklist(){
+  if(!selectedId) return;
+  const t=getT(selectedId), ex=expanded[selectedId];
+  const c1=ex.size===t.hops.length, c2=!!previewOpen[selectedId],
+        c3=t.note!=="", c4=t.decision!==null;
+  const items=[["ckTrace",c1],["ckPreview",c2],["ckNote",c3],["ckDecision",c4]];
+  let done=0;
+  items.forEach(([id,ok])=>{ const li=$(id);
+    li.className=ok?"done":""; li.querySelector(".box").textContent=ok?"✓":""; if(ok)done++; });
+  $("pbarFill").style.width=(done/4*100)+"%";
+}
+
+/* ---------- init ---------- */
+renderStats(); renderQueue();
+const first=filtered()[0];
+if(first) selectTicket(first.id);
+</script>
+</body>
+</html>
